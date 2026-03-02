@@ -8,7 +8,6 @@
 // === NVM w OSTATNIM sektorze 4KB (CH32V203C8: flash kończy się na 0x08010000) ===
 #define FLASH_NVM_BASE_ADDR   ((uint32_t)0x0800F000)   // 4KB sector
 
-// 6 stron po 256B = 1536B łącznie
 #define FLASH_NVM_CAL_ADDR    (FLASH_NVM_BASE_ADDR + 0x000) // 1x256B
 #define FLASH_NVM_MOTION_ADDR (FLASH_NVM_BASE_ADDR + 0x100) // 1x256B
 #define FLASH_NVM_AMS_ADDR    (FLASH_NVM_BASE_ADDR + 0x200) // 4x256B (0..3) => do +0x5FF
@@ -20,6 +19,7 @@
 static constexpr uint32_t MAGIC_FIL = 0x314C4946u; // 'FIL1'
 static constexpr uint32_t MAGIC_CAL = 0x324C4143u; // 'CAL2'
 static constexpr uint32_t MAGIC_MOT = 0x31544F4Du; // 'MOT1'
+static constexpr uint32_t MAGIC_STA = 0x31415453u; // 'STA1'
 static constexpr uint16_t VER_1     = 0x0001u;
 
 struct __attribute__((packed, aligned(4))) NVM256_HDR
@@ -51,7 +51,6 @@ bool Flash_AMS_filament_clear(uint8_t filament_idx);
 
 bool Flash_AMS_state_read(uint8_t* loaded_channel);
 bool Flash_AMS_state_write(uint8_t loaded_channel, const Flash_FilamentInfo* filament0_info);
-
 
 // CAL: 1x 256B
 bool Flash_MC_PULL_cal_read(float offs[4], float vmin[4], float vmax[4]);
