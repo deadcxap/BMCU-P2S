@@ -237,6 +237,7 @@ bool set_motion(unsigned char read_num, unsigned char statu_flags, unsigned char
                 }
 
                 ams_ptr->filament[ch].motion = _filament_motion::send_out;
+                ams_ptr->filament_use_flag = 0x02;
                 ams_ptr->pressure = 0x4700;
             }
             else if (is_before_on_use)

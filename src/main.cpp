@@ -36,7 +36,7 @@ void RGB_update()
     if (!period)
     {
         const uint32_t tpm = time_hw_ticks_per_ms();
-        uint64_t p = (uint64_t)tpm * 10ull;
+        uint64_t p = (uint64_t)tpm * 50ull;           // 50ms
         period = (p ? p : 1ull);
     }
 
