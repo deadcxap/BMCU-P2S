@@ -14,7 +14,6 @@ static constexpr uint32_t kHalfLen = (kBufLen / 2);
 static bool g_adc_dma_inited = false;
 bool ADC_DMA_is_inited() { return g_adc_dma_inited; }
 
-// DMA word: [31:16]=ADC2, [15:0]=ADC1
 static volatile uint32_t g_dma_buf[kBufLen] __attribute__((aligned(4)));
 
 static uint32_t g_ring_sum[kNBlocks][kCh];
@@ -24,8 +23,8 @@ static uint8_t  g_blocks_filled = 0;
 
 static float            g_v[2][kCh] __attribute__((aligned(4)));
 static volatile uint8_t g_v_rd = 0;
+static volatile uint8_t g_acc_dirty = 0;
 
-// okno: kBlock * kNBlocks = 32*4 = 128 próbek; suma ADC1+ADC2 => max 8190
 static constexpr float kScale32  = 3.3f / (8190.0f *  32.0f);
 static constexpr float kScale64  = 3.3f / (8190.0f *  64.0f);
 static constexpr float kScale96  = 3.3f / (8190.0f *  96.0f);
@@ -35,6 +34,11 @@ static float g_scale = kScale32;
 static inline __attribute__((always_inline)) void adc_dma_barrier()
 {
     __asm__ volatile("fence iorw, iorw" ::: "memory");
+}
+
+static inline __attribute__((always_inline)) void adc_dma_compiler_barrier()
+{
+    __asm__ volatile("" ::: "memory");
 }
 
 void ADC_DMA_gpio_analog()
@@ -60,34 +64,14 @@ static inline void filter_reset()
         for (uint32_t ch = 0; ch < kCh; ch++)
             g_ring_sum[b][ch] = 0;
 
-    for (uint32_t ch = 0; ch < kCh; ch++) {
+    for (uint32_t ch = 0; ch < kCh; ch++)
+    {
         g_v[0][ch] = 0.0f;
         g_v[1][ch] = 0.0f;
     }
 
     g_v_rd = 0;
-    adc_dma_barrier();
-}
-
-static inline void publish_values()
-{
-    const float scale = g_scale;
-
-    const uint8_t wr = (uint8_t)(g_v_rd ^ 1u);
-    float* out = g_v[wr];
-
-    out[0] = (float)g_acc_sum[0] * scale;
-    out[1] = (float)g_acc_sum[1] * scale;
-    out[2] = (float)g_acc_sum[2] * scale;
-    out[3] = (float)g_acc_sum[3] * scale;
-    out[4] = (float)g_acc_sum[4] * scale;
-    out[5] = (float)g_acc_sum[5] * scale;
-    out[6] = (float)g_acc_sum[6] * scale;
-    out[7] = (float)g_acc_sum[7] * scale;
-
-    adc_dma_barrier();
-    g_v_rd = wr;
-    adc_dma_barrier();
+    g_acc_dirty = 0;
 }
 
 static inline __attribute__((always_inline)) uint32_t adc_pair_sum(uint32_t w)
@@ -99,7 +83,7 @@ static inline __attribute__((always_inline)) uint32_t adc_pair_sum(uint32_t w)
 
 static inline void process_half_update_filter(const uint32_t* p_half)
 {
-    uint32_t s0=0,s1=0,s2=0,s3=0,s4=0,s5=0,s6=0,s7=0;
+    uint32_t s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0;
 
     const uint32_t* __restrict row = p_half;
     for (uint32_t s = 0; s < kBlock; s++)
@@ -128,20 +112,21 @@ static inline void process_half_update_filter(const uint32_t* p_half)
         o = g_ring_sum[idx][7]; g_ring_sum[idx][7] = s7; g_acc_sum[7] = g_acc_sum[7] - o + s7;
     }
 
-    uint8_t ni = (uint8_t)(idx + 1);
-    if (ni >= kNBlocks) ni = 0;
+    uint8_t ni = (uint8_t)(idx + 1u);
+    if (ni >= kNBlocks) ni = 0u;
     g_ring_idx = ni;
 
     if (g_blocks_filled < kNBlocks)
     {
         g_blocks_filled++;
-        if      (g_blocks_filled == 1) g_scale = kScale32;
-        else if (g_blocks_filled == 2) g_scale = kScale64;
-        else if (g_blocks_filled == 3) g_scale = kScale96;
-        else                           g_scale = kScale128;
+        if      (g_blocks_filled == 1u) g_scale = kScale32;
+        else if (g_blocks_filled == 2u) g_scale = kScale64;
+        else if (g_blocks_filled == 3u) g_scale = kScale96;
+        else                            g_scale = kScale128;
     }
 
-    publish_values();
+    adc_dma_compiler_barrier();
+    g_acc_dirty = 1u;
 }
 
 void ADC_DMA_poll()
@@ -183,6 +168,27 @@ void ADC_DMA_poll()
 const float *ADC_DMA_get_value()
 {
     ADC_DMA_poll();
+
+    if (g_acc_dirty)
+    {
+        const float scale = g_scale;
+        const uint8_t wr = (uint8_t)(g_v_rd ^ 1u);
+        float* out = g_v[wr];
+
+        out[0] = (float)g_acc_sum[0] * scale;
+        out[1] = (float)g_acc_sum[1] * scale;
+        out[2] = (float)g_acc_sum[2] * scale;
+        out[3] = (float)g_acc_sum[3] * scale;
+        out[4] = (float)g_acc_sum[4] * scale;
+        out[5] = (float)g_acc_sum[5] * scale;
+        out[6] = (float)g_acc_sum[6] * scale;
+        out[7] = (float)g_acc_sum[7] * scale;
+
+        adc_dma_compiler_barrier();
+        g_v_rd = wr;
+        g_acc_dirty = 0u;
+    }
+
     return g_v[g_v_rd];
 }
 

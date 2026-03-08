@@ -69,7 +69,6 @@ static bool capture_extreme_wait_release(int ch, float center_v, bool want_min, 
         const uint32_t now_t = time_ticks32();
         if ((uint32_t)(now_t - t0) >= dt) break;
 
-        ADC_DMA_poll();
         const float v = adc_pull_v_cal(ch);
 
         // miganie
@@ -170,7 +169,6 @@ void MC_PULL_calibration_boot()
 
     for (int k = 0; k < N; k++)
     {
-        ADC_DMA_poll();
         const float *v = ADC_DMA_get_value();
 
         for (int ch = 0; ch < 4; ch++)

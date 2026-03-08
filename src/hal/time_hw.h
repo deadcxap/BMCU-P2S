@@ -38,7 +38,7 @@ static inline __attribute__((always_inline)) int32_t time_diff32(uint32_t a, uin
 
 static inline __attribute__((always_inline)) uint32_t ms_to_ticks32(uint32_t ms)
 {
-    const uint32_t tpm = time_hw_ticks_per_ms();
+    const uint32_t tpm = time_hw_tpms;
     if (!ms || !tpm) return 0u;
 
     const uint32_t max_ms = 0xFFFFFFFFu / tpm;
@@ -49,7 +49,7 @@ static inline __attribute__((always_inline)) uint32_t ms_to_ticks32(uint32_t ms)
 
 static inline __attribute__((always_inline)) uint32_t us_to_ticks32(uint32_t us)
 {
-    const uint32_t tpu = time_hw_ticks_per_us();
+    const uint32_t tpu = time_hw_tpus;
     if (!us || !tpu) return 0u;
 
     const uint32_t max_us = 0xFFFFFFFFu / tpu;

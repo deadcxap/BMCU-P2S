@@ -153,8 +153,9 @@ static float  MC_PULL_stu_raw[4]        = {1.65f, 1.65f, 1.65f, 1.65f};
 static int8_t MC_PULL_stu[4]            = {0, 0, 0, 0};
 
 static uint8_t  MC_ONLINE_key_stu[4]    = {0, 0, 0, 0};
-static uint8_t  g_on_use_low_latch[4]   = {0, 0, 0, 0};   // 1=HARD BLOCK latch (do ks==0u||2u)
-static uint16_t g_on_use_hi_pwm_ms[4]   = {0, 0, 0, 0};   // hi-push >800ms accumulator (8s)
+static uint8_t  g_on_use_low_latch[4]   = {0, 0, 0, 0};   // 1=stop motor latch
+static uint8_t  g_on_use_jam_latch[4]   = {0, 0, 0, 0};   // 1=real jam -> 0xF06F
+static uint16_t g_on_use_hi_pwm_ms[4]   = {0, 0, 0, 0};   // hi-push >700 accumulator (8s)
 
 static inline __attribute__((always_inline)) void MC_STU_RGB_set_latch(uint8_t ch, uint8_t r, uint8_t g, uint8_t b, uint64_t now_ms, uint8_t blink)
 {
@@ -181,7 +182,7 @@ static constexpr uint64_t DM_AUTO_S1_TIMEOUT_MS        = 5000ull;  // 5s
 static constexpr uint64_t DM_AUTO_S1_FAIL_RETRACT_MS   = 1500ull;  // 1.5s
 
 static constexpr float    DM_AUTO_S2_TARGET_M          = 0.120f;   // 120mm
-static constexpr float    DM_AUTO_BUF_ABORT_PCT        = 65.0f;    // abort push
+static constexpr float    DM_AUTO_BUF_ABORT_PCT        = 75.0f;    // abort push
 static constexpr float    DM_AUTO_BUF_RECOVER_PCT      = 50.2f;    // retract-to (try 1/2)
 static constexpr uint64_t DM_AUTO_FAIL_EXTRA_MS        = 1500ull;  // extra retract after fail
 static constexpr float    DM_AUTO_PWM_PUSH             = 900.0f;   // push strength
@@ -687,6 +688,14 @@ public:
 
         const filament_motion_enum prev = motion;
         motion = _motion;
+
+        if ((_motion != filament_motion_enum::filament_motion_pressure_ctrl_on_use) &&
+            g_on_use_low_latch[CHx] && !g_on_use_jam_latch[CHx])
+        {
+            g_on_use_low_latch[CHx] = 0u;
+            g_on_use_hi_pwm_ms[CHx] = 0u;
+        }
+
         pwm_zeroed = 0;
 
         if (_motion == filament_motion_enum::filament_motion_send) {
@@ -715,27 +724,23 @@ public:
             pull_start_ms = 0;
         }
 
-        // marker "ever on_use"
         if (_motion == filament_motion_enum::filament_motion_pressure_ctrl_on_use)
         {
             if (g_last_on_use_exit_ms[CHx] == 0) g_last_on_use_exit_ms[CHx] = 1;
         }
 
-        // exit timestamp
         if (prev == filament_motion_enum::filament_motion_pressure_ctrl_on_use &&
             _motion != filament_motion_enum::filament_motion_pressure_ctrl_on_use)
         {
             g_last_on_use_exit_ms[CHx] = time_now;
         }
 
-        // CLEAR
         if (_motion == filament_motion_enum::filament_motion_send ||
             _motion == filament_motion_enum::filament_motion_pull)
         {
             g_last_on_use_exit_ms[CHx] = 0;
         }
 
-        // SEND reset
         if (_motion == filament_motion_enum::filament_motion_send)
         {
             send_hard = false;
@@ -1803,9 +1808,10 @@ public:
             {
                 const float pct = MC_PULL_pct_f[CHx];
 
-                if (pct <= 40.0f)
+                if (pct < 40.0f)
                 {
                     g_on_use_low_latch[CHx] = 1u;
+                    g_on_use_jam_latch[CHx] = 1u;
                 }
                 else
                 {
@@ -1821,23 +1827,14 @@ public:
                     {
                         const uint16_t add = (uint16_t)(time_E * 1000.0f + 0.5f);
 
-                        const uint32_t t0 = (uint32_t)g_on_use_hi_pwm_ms[CHx];
-                        uint32_t t1 = t0 + (uint32_t)add;
+                        uint32_t t1 = (uint32_t)g_on_use_hi_pwm_ms[CHx] + (uint32_t)add;
                         if (t1 > 8000u) t1 = 8000u;
                         g_on_use_hi_pwm_ms[CHx] = (uint16_t)t1;
-
-                        // check po 2s ciaglego push_hi, potem co 1s
-                        bool check_now = false;
-                        if (t0 < 2000u && t1 >= 2000u) check_now = true;
-                        else if (t0 >= 2000u && (t0 / 1000u) != (t1 / 1000u)) check_now = true;
 
                         if (t1 >= 8000u)
                         {
                             g_on_use_low_latch[CHx] = 1u;
-                        }
-                        else if (check_now && (pct <= 48.0f))
-                        {
-                            g_on_use_low_latch[CHx] = 1u;
+                            g_on_use_jam_latch[CHx] = 0u;
                         }
                     }
                     else
@@ -1851,7 +1848,8 @@ public:
                     g_on_use_hi_pwm_ms[CHx] = 0u;
 
                     auto &A = ams[motion_control_ams_num];
-                    if (A.now_filament_num == (uint8_t)CHx) A.pressure = 0xF06Fu;
+                    if (g_on_use_jam_latch[CHx] && A.now_filament_num == (uint8_t)CHx)
+                        A.pressure = 0xF06Fu;
 
                     MC_STU_RGB_set(CHx, 0xFF, 0x00, 0x00);
 
@@ -2143,7 +2141,7 @@ static void motor_motion_switch(uint64_t time_now)
 
             case _filament_motion::send_out:
             {
-                if (g_on_use_low_latch[num])
+                if (g_on_use_jam_latch[num])
                 {
                     MOTOR_CONTROL[num].set_motion(filament_motion_enum::filament_motion_stop, 100, time_now);
                     MC_STU_RGB_set_latch(num, 0x00u, 0xD5u, 0x2Au, time_now, 0u);
@@ -2164,7 +2162,7 @@ static void motor_motion_switch(uint64_t time_now)
                 filament_pull_back_meters[num] = A.filament[num].meters;
 
                 float target;
-                if (g_on_use_low_latch[num])
+                if (g_on_use_jam_latch[num])
                 {
                     target = 0.100f;
                 }
@@ -2243,7 +2241,7 @@ static void motor_motion_switch(uint64_t time_now)
             {
                 filament_now_position[num] = filament_idle;
 
-                if (g_on_use_low_latch[num])
+                if (g_on_use_jam_latch[num])
                 {
                     MOTOR_CONTROL[num].set_motion(filament_motion_enum::filament_motion_stop, 100, time_now);
                     MC_STU_RGB_set_latch(num, 0x38u, 0x35u, 0x32u, time_now, 0u);
@@ -2272,10 +2270,8 @@ static void motor_motion_switch(uint64_t time_now)
     }
 }
 
-static inline void stu_apply_baseline(int error)
+static inline void stu_apply_baseline(int error, uint64_t now_ms)
 {
-    const uint64_t now_ms = time_ms_fast();
-
     for (uint8_t i = 0; i < kChCount; i++)
     {
         if (g_on_use_low_latch[i])
@@ -2317,9 +2313,8 @@ static inline void stu_apply_baseline(int error)
 }
 
 
-static void motor_motion_run(int error)
+static void motor_motion_run(int error, uint64_t time_now)
 {
-    const uint64_t time_now = time_ms_fast();
 
     #if BMCU_DM_TWO_MICROSWITCH
         for (uint8_t ch = 0; ch < kChCount; ch++)
@@ -2391,7 +2386,7 @@ static void motor_motion_run(int error)
 
     const float time_E = (float)dt_ms * 0.001f;
     time_last = time_now;
-    stu_apply_baseline(error);
+    stu_apply_baseline(error, time_now);
 
 #if BMCU_ONLINE_LED_FILAMENT_RGB
     auto &Acol = ams[motion_control_ams_num];
@@ -2490,9 +2485,8 @@ void Motion_control_run(int error)
     MC_PULL_ONLINE_read();
 
     auto &A = ams[motion_control_ams_num];
-
-    // clear blokady zacięcia filamentu tylko po wyjeciu filamentu
     const uint64_t now_ms = time_ms_fast();
+
     for (uint8_t ch = 0; ch < kChCount; ch++)
     {
         const uint8_t ks = MC_ONLINE_key_stu[ch];
@@ -2516,17 +2510,21 @@ void Motion_control_run(int error)
                 }
             }
 
-            g_on_use_low_latch[ch] = 0u;
+            if (g_on_use_jam_latch[ch])
+            {
+                g_on_use_low_latch[ch] = 0u;
+                g_on_use_jam_latch[ch] = 0u;
+            }
+
             g_on_use_hi_pwm_ms[ch] = 0u;
         }
     }
 
-    // jesli aktywny kanal jest w ON_USE i latch aktywny -> force pressure + czerwony status
     if (!error)
     {
         const uint8_t n = A.now_filament_num;
 
-        if ((n < kChCount) && filament_channel_inserted[n] && g_on_use_low_latch[n])
+        if ((n < kChCount) && filament_channel_inserted[n] && g_on_use_jam_latch[n])
         {
             const _filament_motion m = A.filament[n].motion;
 
@@ -2537,7 +2535,6 @@ void Motion_control_run(int error)
         }
     }
 
-    // long-press reset kalibracji (tylko gdy brak filamentu na wszystkich kanałach)
     if ((error <= 0) && all_no_filament())
     {
         int pressed = -1;
@@ -2593,7 +2590,7 @@ void Motion_control_run(int error)
             A.filament[i].online = false;
     }
 
-    motor_motion_run(error);
+    motor_motion_run(error, now_ms);
 
     for (uint8_t i = 0; i < kChCount; i++)
     {

@@ -46,13 +46,6 @@ build_and_copy() {
   BMCU_DM_TWO_MICROSWITCH="${dm}" \
   BMCU_ONLINE_LED_FILAMENT_RGB="${rgb}" \
   DBMCU_P1S="${p1s}" \
-  pio run -e "${PIO_ENV}" -t clean
-
-  BAMBU_BUS_AMS_NUM="${ams_num}" \
-  AMS_RETRACT_LEN="${retract_len}" \
-  BMCU_DM_TWO_MICROSWITCH="${dm}" \
-  BMCU_ONLINE_LED_FILAMENT_RGB="${rgb}" \
-  DBMCU_P1S="${p1s}" \
   pio run -e "${PIO_ENV}"
 
   local src=".pio/build/${PIO_ENV}/firmware.bin"

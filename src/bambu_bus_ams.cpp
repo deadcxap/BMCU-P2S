@@ -150,21 +150,20 @@ bambubus_package_type get_packge_type(unsigned char *buf, int length)
 }
 uint8_t package_num = 0;
 
-uint8_t get_filament_left_char(_ams *ams)
+uint8_t get_filament_left_char(const _ams *ams)
 {
-    uint8_t data = 0;
-    for (int i = 0; i < 4; i++)
+    uint8_t data = 0u;
+    const bool is_ams = (bambubus_ams_address == host_device_type_ams);
+
+    for (uint8_t i = 0; i < 4u; i++)
     {
-        if (ams->filament[i].online == true)
-        {
-            data |= (0x1 << i) << i; // 1<<(2*i)
-            if (bambubus_ams_address == host_device_type_ams)
-                if (ams->filament[i].motion != _filament_motion::idle)
-                {
-                    data |= (0x2 << i) << i; // 2<<(2*i)
-                }
-        }
+        if (!ams->filament[i].online) continue;
+
+        data |= (uint8_t)(1u << (i << 1));
+        if (is_ams && ams->filament[i].motion != _filament_motion::idle)
+            data |= (uint8_t)(2u << (i << 1));
     }
+
     return data;
 }
 
@@ -905,7 +904,7 @@ void get_package_long_packge_serial_number(unsigned char *buf, int length)
 //0x46 // 70
 //0x50 // 80
 //0x5A // 90
-unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x0A, 0x0A , // verison number
+unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x14, 0x0A , // verison number
                                                               0x41, 0x4D, 0x53, 0x30, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 //unsigned char long_packge_version_version_and_name_AMS2PRO[] = {
 //    0x00, 0x00, 0x00, 0x5A,
@@ -1026,8 +1025,8 @@ bambubus_package_type bambubus_run()
 {
     bambubus_package_type stu = bambubus_package_type::none;
 
-    static uint64_t deadline_hb = 0;
-    const uint64_t now = time_ticks64();
+    static uint32_t deadline_hb = 0u;
+    const uint32_t now = time_ticks32();
 
     int rx_len = 0;
     _bus_data_type t = _bus_data_type::none;
@@ -1052,7 +1051,7 @@ bambubus_package_type bambubus_run()
             switch (stu)
             {
             case bambubus_package_type::heartbeat:
-                deadline_hb = now + (uint64_t)1000u * (uint64_t)time_hw_tpms;
+                deadline_hb = now + ms_to_ticks32(1000u);
                 break;
 
             case bambubus_package_type::filament_motion_short:
@@ -1117,7 +1116,7 @@ bambubus_package_type bambubus_run()
         }
     }
 
-    if (now > deadline_hb)
+    if (time_diff32(now, deadline_hb) > 0)
         stu = bambubus_package_type::error;
 
     return stu;

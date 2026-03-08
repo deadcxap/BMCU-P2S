@@ -52,18 +52,28 @@ To flash any version of the BMCU (USB or TTL) on:
 - Windows
 - Linux
 - macOS
+- Android
 
-use my official cross-platform flasher:
+use **BMCU Flasher**:
 
 https://github.com/jarczakpawel/BMCU-Flasher
 
-Precompiled binaries are available in the "Releases" section.
+Precompiled binaries are available in the **Releases** section.
 
-The flashing process is very simple and does not require wchisptool.
+The flashing process is very simple and **does not require wchisptool**.
+
+You can flash firmware in two ways:
+
+- **Online flashing** directly from the built-in wizard (recommended)  
+  → the flasher downloads the correct firmware automatically, so you **do not need to download any .bin files manually**.
+
+- **Local flashing** using a firmware file you downloaded yourself.
+
+The flasher also supports **Android**, so you can even flash the BMCU directly from your **phone** 🙂
 
 IMPORTANT:
-- Do NOT flash the BMCU while it is connected to the printer.
-- Do NOT connect or disconnect the BMCU while the printer is powered on (risk of damaging the BMCU and/or the printer mainboard).
+- Do **NOT** flash the BMCU while it is connected to the printer.
+- Do **NOT** connect or disconnect the BMCU while the printer is powered on (risk of damaging the BMCU and/or the printer mainboard).
 
 ## Folder structure (generated firmware)
 
@@ -241,6 +251,36 @@ This firmware has undergone solid testing, and no issues are expected.
 ---
 
 # Changelog
+
+## V10.2
+
+### User-visible changes
+- Fixed a problem where **filament run-out could incorrectly trigger a jam condition**.  
+  When filament ended, the motor could run continuously and eventually enter jam protection, which blocked the **automatic filament refill**.
+- Reworked jam protection logic:
+    - real filament jams are now detected separately from temporary motor stops
+    - high motor load alone no longer falsely triggers a jam
+- Improved flash persistence system (less unnecessary flash rewriting).
+- Improved ADC/DMA processing:
+    - faster value updates
+    - lower CPU overhead
+    - smoother runtime behavior
+- Various timing and stability improvements.
+
+### Technical changes
+- **Filament metadata flash storage redesigned.**
+    - append-only journal instead of rewriting a full flash page
+    - each record: **40 bytes (10 words)**
+    - **CRC32 validation**
+    - **6 records per flash page**
+    - page erase only when the page becomes full  
+      This significantly reduces flash wear and makes writes power-loss safe.
+- Loaded-channel persistence reworked into a lightweight **slot log** to reduce erase cycles.
+- Added **skip-if-unchanged** logic to avoid unnecessary flash writes.
+- Simplified and optimized **ADC DMA update/publish path**.
+- CRC tables moved to **static compile-time tables** (no runtime generation).
+- Cleanup of timing paths using **wrap-safe 32-bit timers**.
+- Several other smaller fixes and internal optimizations.
 
 ## V10
 
