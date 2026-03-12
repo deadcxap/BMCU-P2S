@@ -1,10 +1,11 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
-// API
 void Motion_control_init();
 void Motion_control_set_PWM(uint8_t CHx, int PWM);
 void Motion_control_run(int error);
+bool Motion_control_save_dm_key_none_thresholds(void);
 
 void MC_PULL_detect_channels_inserted();
 
@@ -13,6 +14,8 @@ extern float   MC_PULL_V_OFFSET[4];
 extern float   MC_PULL_V_MIN[4];
 extern float   MC_PULL_V_MAX[4];
 extern uint8_t MC_PULL_pct[4];
+extern int8_t  MC_PULL_POLARITY[4];
+extern float   MC_DM_KEY_NONE_THRESH[4];
 extern bool    filament_channel_inserted[4];
 
 // platformio.ini: -DBAMBU_BUS_AMS_NUM

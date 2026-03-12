@@ -235,6 +235,7 @@ static uint32_t time_sendout_onuse_ticks[4] = {};
                  }
 
                  ams_ptr->filament[ch].motion = _filament_motion::send_out;
+                 ams_ptr->filament_use_flag = 0x02;
                  ams_ptr->pressure = 0x4700;
              }
              else if (is_before_on_use)
@@ -904,7 +905,7 @@ void get_package_long_packge_serial_number(unsigned char *buf, int length)
 //0x46 // 70
 //0x50 // 80
 //0x5A // 90
-unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x14, 0x0A , // verison number
+unsigned char long_packge_version_version_and_name_AMS08[] = {0x00, 0x00, 0x1E, 0x0A , // verison number
                                                               0x41, 0x4D, 0x53, 0x30, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 //unsigned char long_packge_version_version_and_name_AMS2PRO[] = {
 //    0x00, 0x00, 0x00, 0x5A,

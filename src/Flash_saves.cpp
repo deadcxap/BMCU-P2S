@@ -386,23 +386,30 @@ struct alignas(4) Flash_CAL_payload
     float vmax[4];
 };
 
-bool Flash_MC_PULL_cal_write_all(const float offs[4], const float vmin[4], const float vmax[4])
+bool Flash_MC_PULL_cal_write_all(const float offs[4], const float vmin[4], const float vmax[4], const int8_t pol[4])
 {
     Flash_CAL_payload p;
     memcpy(p.offs, offs, sizeof(p.offs));
     memcpy(p.vmin, vmin, sizeof(p.vmin));
     memcpy(p.vmax, vmax, sizeof(p.vmax));
 
-    return nvm256_write(FLASH_NVM_CAL_ADDR, MAGIC_CAL, VER_1, 0u, &p, (uint16_t)sizeof(p));
+    uint32_t rsv = 0u;
+    for (uint8_t ch = 0u; ch < 4u; ch++)
+    {
+        if (pol && pol[ch] < 0) rsv |= (1u << ch);
+    }
+
+    return nvm256_write(FLASH_NVM_CAL_ADDR, MAGIC_CAL, VER_1, rsv, &p, (uint16_t)sizeof(p));
 }
 
-bool Flash_MC_PULL_cal_read(float offs[4], float vmin[4], float vmax[4])
+bool Flash_MC_PULL_cal_read(float offs[4], float vmin[4], float vmax[4], int8_t pol[4])
 {
     Flash_CAL_payload p;
     uint16_t got = 0u;
+    uint32_t rsv = 0u;
 
     if (!nvm256_read(FLASH_NVM_CAL_ADDR, MAGIC_CAL, VER_1,
-                     &p, (uint16_t)sizeof(p), &got, nullptr))
+                     &p, (uint16_t)sizeof(p), &got, &rsv))
         return false;
 
     if (got != sizeof(p)) return false;
@@ -410,6 +417,13 @@ bool Flash_MC_PULL_cal_read(float offs[4], float vmin[4], float vmax[4])
     memcpy(offs, p.offs, sizeof(p.offs));
     memcpy(vmin, p.vmin, sizeof(p.vmin));
     memcpy(vmax, p.vmax, sizeof(p.vmax));
+
+    if (pol)
+    {
+        for (uint8_t ch = 0u; ch < 4u; ch++)
+            pol[ch] = (rsv & (1u << ch)) ? -1 : 1;
+    }
+
     return true;
 }
 
@@ -433,7 +447,7 @@ bool Flash_Motion_read(void* out, uint16_t bytes)
                      out, bytes, &got, nullptr))
         return false;
 
-    return (got == bytes);
+    return (got != 0u) && (got <= bytes);
 }
 
 bool Flash_Motion_clear(void)

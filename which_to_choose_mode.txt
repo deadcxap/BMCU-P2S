@@ -1,14 +1,12 @@
-#######   ##     ##   #######   ##     ##
-##    ##  ###   ###  ##     ##  ##     ##
-##    ##  #### ####  ##         ##     ##
-#######   ## ### ##  ##         ##     ##
-##    ##  ##     ##  ##         ##     ##
-##    ##  ##     ##  ##     ##  ##     ##
-#######   ##     ##   #######    #######
+ ____  __  __   ____  _   _
+| __ )|  \/  | / ___|| | | |
+|  _ \| |\/| || |    | | | |
+| |_) | |  | || |___ | |_| |
+|____/|_|  |_| \____| \___/
 
 
 Which firmware folder should I choose here?
-Choose between: standard(A1) or high_force_load(P1S)
+Choose between: soft_load(A1), standard(A1) or high_force_load(P1S)
 
 --------------------------------------------------------------------------
 
@@ -25,9 +23,30 @@ high_force_load(P1S)
   - your PTFE path is long/complex (many bends), even on A1, or
   - you experience loading problems such as rejected/failed load events (most commonly caused by too little pushing force during loading).
 
-If you’re unsure:
+soft_load(A1)
+- Recommended for: A1 / A1 Mini users only.
+- This mode uses: lower filament loading force than standard(A1).
+- Designed for: some BMCU units that use weaker spring variants and therefore do not hold the filament strongly enough during loading, which can cause clicking/grinding noises.
+- Choose this if:
+  - you use an A1 or A1 Mini, and
+  - you hear grinding/clicking during filament loading, and
+  - you want to reduce BMCU wear.
+- Important:
+  - The best solution is still to replace the lever pressure spring with a stronger one.
+  - If needed, you can use this firmware package with reduced loading force instead.
+- Warning:
+  - This mode may cause loading issues, including the printer rejecting the filament because the pushing force is too weak.
+  - If that happens, please do NOT report loading problems when using this firmware set.
+  - In such a case, switch back to standard(A1) and use a stronger pressure spring.
+- Additional note:
+  - Some users have absolutely no loading problems with this version.
+  - In general, BMCU is less stressed on this mode, so if everything works correctly, it is perfectly fine to keep using it.
+  - For example, on my own A1 Mini this mode works extremely well, and this is the version I personally use.
+
+If you're unsure:
 - Start with standard(A1).
 - If loading is inconsistent or gets rejected, switch to high_force_load(P1S).
+- If you use an A1 / A1 Mini and hear grinding during loading, try soft_load(A1).
 
 --------------------------------------------------------------------------
 

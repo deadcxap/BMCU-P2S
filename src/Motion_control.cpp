@@ -15,18 +15,34 @@ static inline float clampf(float x, float a, float b)
     return x;
 }
 
+static inline uint8_t dm_key_v_to_centi_ceil(float v)
+{
+    if (v <= 0.0f) return 0u;
+
+    float x = v * 100.0f - 0.0001f;
+    int iv = (int)x;
+    if ((float)iv < x) iv++;
+
+    if (iv < 0) iv = 0;
+    if (iv > 255) iv = 255;
+    return (uint8_t)iv;
+}
+
+static inline float dm_key_centi_to_v(uint8_t cv)
+{
+    return 0.01f * (float)cv;
+}
+
 static uint64_t g_time_last_ticks64 = 0ull;
 static uint32_t g_time_rem_ticks32  = 0u;
 static uint64_t g_time_ms64         = 0ull;
 static uint32_t g_time_tpm_last     = 0u;
 static uint8_t  g_time_inited       = 0u;
 
-static inline __attribute__((always_inline)) uint64_t time_ms_fast(void)
+static inline __attribute__((always_inline)) uint64_t time_ms_fast_from_ticks64(uint64_t now_ticks)
 {
     uint32_t tpm = time_hw_tpms;
     if (!tpm) tpm = 1u;
-
-    const uint64_t now_ticks = time_ticks64();
 
     if (!g_time_inited || (tpm != g_time_tpm_last))
     {
@@ -73,6 +89,11 @@ static inline __attribute__((always_inline)) uint64_t time_ms_fast(void)
 
     g_time_ms64 += (uint64_t)inc;
     return g_time_ms64;
+}
+
+static inline __attribute__((always_inline)) uint64_t time_ms_fast(void)
+{
+    return time_ms_fast_from_ticks64(time_ticks64());
 }
 
 static inline float retract_mag_from_err(float err, float mag_max)
@@ -142,9 +163,11 @@ static constexpr float PULL_PWM_MIN  = 400.0f;  // "kop" przy pullback
 static float g_pull_remain_m[4]  = {0,0,0,0};
 static float g_pull_speed_set[4] = {-PULL_V_FAST,-PULL_V_FAST,-PULL_V_FAST,-PULL_V_FAST}; // mm/s (ujemne)
 
-float MC_PULL_V_OFFSET[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-float MC_PULL_V_MIN[4]    = {1.00f, 1.00f, 1.00f, 1.00f};
-float MC_PULL_V_MAX[4]    = {2.00f, 2.00f, 2.00f, 2.00f};
+float MC_PULL_V_OFFSET[4]      = {0.0f, 0.0f, 0.0f, 0.0f};
+float MC_PULL_V_MIN[4]         = {1.00f, 1.00f, 1.00f, 1.00f};
+float MC_PULL_V_MAX[4]         = {2.00f, 2.00f, 2.00f, 2.00f};
+int8_t MC_PULL_POLARITY[4]     = {1, 1, 1, 1};
+float MC_DM_KEY_NONE_THRESH[4] = {0.60f, 0.60f, 0.60f, 0.60f};
 
 uint8_t MC_PULL_pct[4]        = {50, 50, 50, 50};
 static float MC_PULL_pct_f[4] = {50.0f, 50.0f, 50.0f, 50.0f};
@@ -155,7 +178,7 @@ static int8_t MC_PULL_stu[4]            = {0, 0, 0, 0};
 static uint8_t  MC_ONLINE_key_stu[4]    = {0, 0, 0, 0};
 static uint8_t  g_on_use_low_latch[4]   = {0, 0, 0, 0};   // 1=stop motor latch
 static uint8_t  g_on_use_jam_latch[4]   = {0, 0, 0, 0};   // 1=real jam -> 0xF06F
-static uint16_t g_on_use_hi_pwm_ms[4]   = {0, 0, 0, 0};   // hi-push >700 accumulator (8s)
+static uint32_t g_on_use_hi_pwm_us[4]   = {0u, 0u, 0u, 0u};
 
 static inline __attribute__((always_inline)) void MC_STU_RGB_set_latch(uint8_t ch, uint8_t r, uint8_t g, uint8_t b, uint64_t now_ms, uint8_t blink)
 {
@@ -168,11 +191,13 @@ static inline __attribute__((always_inline)) void MC_STU_RGB_set_latch(uint8_t c
 }
 
 #if BMCU_DM_TWO_MICROSWITCH
-static inline uint8_t dm_key_to_state(float v)
+static inline uint8_t dm_key_to_state(uint8_t ch, float v)
 {
-    if (v < 0.6f) return 0u;   // none
-    if (v > 1.7f) return 1u;   // both
-    if (v > 1.4f) return 2u;   // external only
+    const float none_thr = MC_DM_KEY_NONE_THRESH[ch];
+
+    if (v < none_thr) return 0u;   // none
+    if (v > 1.7f)     return 1u;   // both
+    if (v > 1.4f)     return 2u;   // external only
     return 3u;
 }
 
@@ -204,7 +229,7 @@ enum : uint8_t
 static uint8_t  dm_loaded[4]            = {1,1,1,1};   // 1=loaded (after stage2 success)
 static uint8_t  dm_fail_latch[4]        = {0,0,0,0};   // latch until ks==0 (<0.6V)
 static uint8_t  dm_auto_state[4]        = {0,0,0,0};
-static uint8_t dm_autoload_gate[4]      = {0,0,0,0}; // 0=allow Stage1, 1=block Stage1 until idle+ks==0
+static uint8_t  dm_autoload_gate[4]     = {0,0,0,0}; // 0=allow Stage1, 1=block Stage1 until idle+ks==0
 static uint8_t  dm_auto_try[4]          = {0,0,0,0};   // abort count (stage2)
 static uint64_t dm_auto_t0_ms[4]        = {0ull,0ull,0ull,0ull};
 static float    dm_auto_remain_m[4]     = {0,0,0,0};
@@ -221,7 +246,22 @@ static constexpr int MC_PULL_DEADBAND_PCT_LOW  = 30;
 static constexpr int MC_PULL_DEADBAND_PCT_HIGH = 70;
 
 // ================ LOAD CONTROL ======================
-#if BMCU_P1S  // P1S
+#if BMCU_SOFT_LOAD
+    // Stage1
+    static constexpr int   MC_LOAD_S1_FAST_PCT       = 75;
+    static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 90;  // bezpiecznik
+    static constexpr int   MC_LOAD_S1_HARD_HYS       = 2;   // wróć dopiero < (HARD_STOP - HYS)
+    // Stage2 (hold_load)
+    static constexpr float MC_LOAD_S2_HOLD_TARGET_PCT    = 75.0f;
+    static constexpr float MC_LOAD_S2_HOLD_BAND_LO_DELTA = 0.3f;   // push_hi = hold_target - delta
+    static constexpr float MC_LOAD_S2_PUSH_START_PCT     = 55.0f;  // start push PWM
+    static constexpr float MC_LOAD_S2_PWM_HI             = 480.0f;
+    static constexpr float MC_LOAD_S2_PWM_LO             = 1000.0f;
+    // ===== ON_USE CONTROL =====
+    static constexpr float MC_ON_USE_TARGET_PCT    = 52.0f;
+    static constexpr float MC_ON_USE_BAND_LO_DELTA = 0.2f;  // band_lo = target - delta
+    static constexpr float MC_ON_USE_BAND_HI_PCT   = 60.0f;
+#elif BMCU_P1S  // P1S
     // Stage1
     static constexpr int   MC_LOAD_S1_FAST_PCT       = 88;
     static constexpr int   MC_LOAD_S1_HARD_STOP_PCT  = 97;  // bezpiecznik
@@ -267,7 +307,6 @@ static uint64_t g_last_on_use_exit_ms[4] = {0,0,0,0};
 
 extern void RGB_update();
 extern bool Flash_MC_PULL_cal_clear();
-static inline void Motion_control_dir_clear_and_save();
 
 static inline bool all_no_filament()
 {
@@ -300,17 +339,13 @@ static void blink_all_blue_3s()
 
 static void calibration_reset_and_reboot()
 {
-    // stop wszystko
     for (uint8_t i = 0; i < kChCount; i++) Motion_control_set_PWM(i, 0);
 
     blink_all_blue_3s();
-    // kasuj kalibrację PULL
+
     Flash_MC_PULL_cal_clear();
+    Flash_Motion_clear();
 
-    // kasuj zapisany kierunek silników -> wymusi MOTOR_get_dir() po boocie
-    Motion_control_dir_clear_and_save();
-
-    // reboot
     NVIC_SystemReset();
 }
 
@@ -340,6 +375,12 @@ static float pull_v_to_percent_f(uint8_t ch, float v)
     }
 
     return clampf(pos01, 0.0f, 1.0f) * 100.0f;
+}
+
+static inline float pull_v_apply_polarity(uint8_t ch, float v)
+{
+    if (MC_PULL_POLARITY[ch] < 0) return 3.30f - v;
+    return v;
 }
 
 void MC_PULL_detect_channels_inserted()
@@ -381,21 +422,21 @@ static inline void MC_PULL_ONLINE_init()
     MC_PULL_detect_channels_inserted();
 }
 
-static inline void MC_PULL_ONLINE_read()
+static inline void MC_PULL_ONLINE_read(uint32_t now_ticks)
 {
     const float *data = ADC_DMA_get_value();
 
     // mapowanie ADC -> kanały
-    MC_PULL_stu_raw[3] = data[0] + MC_PULL_V_OFFSET[3];
+    MC_PULL_stu_raw[3] = pull_v_apply_polarity(3u, data[0] + MC_PULL_V_OFFSET[3]);
     const float key3   = data[1];
 
-    MC_PULL_stu_raw[2] = data[2] + MC_PULL_V_OFFSET[2];
+    MC_PULL_stu_raw[2] = pull_v_apply_polarity(2u, data[2] + MC_PULL_V_OFFSET[2]);
     const float key2   = data[3];
 
-    MC_PULL_stu_raw[1] = data[4] + MC_PULL_V_OFFSET[1];
+    MC_PULL_stu_raw[1] = pull_v_apply_polarity(1u, data[4] + MC_PULL_V_OFFSET[1]);
     const float key1   = data[5];
 
-    MC_PULL_stu_raw[0] = data[6] + MC_PULL_V_OFFSET[0];
+    MC_PULL_stu_raw[0] = pull_v_apply_polarity(0u, data[6] + MC_PULL_V_OFFSET[0]);
     const float key0   = data[7];
 
 #if BMCU_DM_TWO_MICROSWITCH
@@ -407,8 +448,8 @@ static inline void MC_PULL_ONLINE_read()
     static bool     gst_active[4]       = {false,false,false,false};
     static uint32_t gst_act_t0_ticks[4] = {0,0,0,0};
 
-    const uint32_t now_ticks = time_ticks32();
-    const uint32_t tpm = time_hw_tpms;
+    uint32_t tpm = time_hw_tpms;
+    if (!tpm) tpm = 1u;
 
     const uint32_t T100  = 100u  * tpm;
     const uint32_t T2000 = 2000u * tpm;
@@ -469,7 +510,7 @@ static inline void MC_PULL_ONLINE_read()
             else if ((uint32_t)(now_ticks - gst_act_t0_ticks[i]) > T5500) gst_active[i] = false;
         }
 
-        const uint8_t phys = dm_key_to_state(keyv[i]);
+        const uint8_t phys = dm_key_to_state(i, keyv[i]);
         uint8_t state = phys;
 
         if (gst_active[i] && (phys == 0u)) state = 2u;
@@ -529,43 +570,84 @@ static inline void MC_PULL_ONLINE_read()
     }
 }
 
-// ===== zapis kierunku silników =====
+// ===== zapis kierunku silników + progow DM key =====
 struct alignas(4) Motion_control_save_struct
 {
     int Motion_control_dir[4];
-    uint32_t check = 0x40614061u;
+    uint32_t check;
+    uint8_t dm_key_none_cv[4];
 } Motion_control_data_save;
 
-#define Motion_control_save_flash_addr FLASH_NVM_MOTION_ADDR
+static inline void Motion_control_defaults()
+{
+    for (uint8_t i = 0; i < kChCount; i++)
+    {
+        Motion_control_data_save.Motion_control_dir[i] = 0;
+        Motion_control_data_save.dm_key_none_cv[i] = 60u;
+    }
+
+    Motion_control_data_save.check = 0x40614061u;
+}
+
+static inline void Motion_control_apply_saved()
+{
+    for (uint8_t i = 0; i < kChCount; i++)
+    {
+        if (Motion_control_data_save.dm_key_none_cv[i] < 60u)
+            Motion_control_data_save.dm_key_none_cv[i] = 60u;
+
+        MC_DM_KEY_NONE_THRESH[i] = dm_key_centi_to_v(Motion_control_data_save.dm_key_none_cv[i]);
+    }
+}
 
 static inline bool Motion_control_read()
 {
+    Motion_control_defaults();
+
     if (!Flash_Motion_read(&Motion_control_data_save, (uint16_t)sizeof(Motion_control_save_struct)))
+    {
+        Motion_control_apply_saved();
         return false;
+    }
 
     if (Motion_control_data_save.check != 0x40614061u)
     {
-        for (uint8_t i = 0; i < kChCount; i++) Motion_control_data_save.Motion_control_dir[i] = 0;
-        Motion_control_data_save.check = 0x40614061u;
+        Motion_control_defaults();
+        Motion_control_apply_saved();
         return false;
     }
+
+    Motion_control_apply_saved();
     return true;
 }
 
-static inline void Motion_control_save()
+static inline bool Motion_control_save()
 {
-    (void)Flash_Motion_write(&Motion_control_data_save, (uint16_t)sizeof(Motion_control_save_struct));
-}
-
-static inline void Motion_control_dir_clear_and_save()
-{
-    for (uint8_t i = 0; i < kChCount; i++)
-        Motion_control_data_save.Motion_control_dir[i] = 0;
-
     Motion_control_data_save.check = 0x40614061u;
-    Motion_control_save();
+
+    for (uint8_t i = 0; i < kChCount; i++)
+    {
+        uint8_t cv = dm_key_v_to_centi_ceil(MC_DM_KEY_NONE_THRESH[i]);
+        if (cv < 60u) cv = 60u;
+        Motion_control_data_save.dm_key_none_cv[i] = cv;
+    }
+
+    return Flash_Motion_write(&Motion_control_data_save, (uint16_t)sizeof(Motion_control_save_struct));
 }
 
+bool Motion_control_save_dm_key_none_thresholds(void)
+{
+    float thr[4];
+    for (uint8_t i = 0; i < kChCount; i++)
+        thr[i] = MC_DM_KEY_NONE_THRESH[i];
+
+    (void)Motion_control_read();
+
+    for (uint8_t i = 0; i < kChCount; i++)
+        MC_DM_KEY_NONE_THRESH[i] = thr[i];
+
+    return Motion_control_save();
+}
 // ===== PID =====
 class MOTOR_PID
 {
@@ -693,7 +775,7 @@ public:
             g_on_use_low_latch[CHx] && !g_on_use_jam_latch[CHx])
         {
             g_on_use_low_latch[CHx] = 0u;
-            g_on_use_hi_pwm_ms[CHx] = 0u;
+            g_on_use_hi_pwm_us[CHx] = 0u;
         }
 
         pwm_zeroed = 0;
@@ -928,7 +1010,7 @@ public:
 
         if (motion == filament_motion_enum::filament_motion_pressure_ctrl_on_use && g_on_use_low_latch[CHx])
         {
-            g_on_use_hi_pwm_ms[CHx] = 0u;
+            g_on_use_hi_pwm_us[CHx] = 0u;
             PID_speed.clear();
             PID_pressure.clear();
             pwm_zeroed = 1;
@@ -1782,11 +1864,8 @@ public:
                 rate_up   = 18000.0f;
             }
 
-            float max_step_up   = rate_up   * time_E;
-            float max_step_down = rate_down * time_E;
-
-            if (max_step_up   < 1.0f) max_step_up   = 1.0f;
-            if (max_step_down < 1.0f) max_step_down = 1.0f;
+            const float max_step_up   = rate_up   * time_E;
+            const float max_step_down = rate_down * time_E;
 
             const float prev = x_prev[CHx];
             const float lo = prev - max_step_down;
@@ -1802,7 +1881,7 @@ public:
         {
             if (MC_ONLINE_key_stu[CHx] == 0u)
             {
-                g_on_use_hi_pwm_ms[CHx] = 0u;
+                g_on_use_hi_pwm_us[CHx] = 0u;
             }
             else
             {
@@ -1825,13 +1904,13 @@ public:
 
                     if (push_hi)
                     {
-                        const uint16_t add = (uint16_t)(time_E * 1000.0f + 0.5f);
+                        const uint32_t add_us = (uint32_t)(time_E * 1000000.0f + 0.5f);
 
-                        uint32_t t1 = (uint32_t)g_on_use_hi_pwm_ms[CHx] + (uint32_t)add;
-                        if (t1 > 8000u) t1 = 8000u;
-                        g_on_use_hi_pwm_ms[CHx] = (uint16_t)t1;
+                        uint32_t t1 = g_on_use_hi_pwm_us[CHx] + add_us;
+                        if (t1 > 8000000u) t1 = 8000000u;
+                        g_on_use_hi_pwm_us[CHx] = t1;
 
-                        if (t1 >= 8000u)
+                        if (t1 >= 8000000u)
                         {
                             g_on_use_low_latch[CHx] = 1u;
                             g_on_use_jam_latch[CHx] = 0u;
@@ -1839,13 +1918,13 @@ public:
                     }
                     else
                     {
-                        g_on_use_hi_pwm_ms[CHx] = 0u;
+                        g_on_use_hi_pwm_us[CHx] = 0u;
                     }
                 }
 
                 if (g_on_use_low_latch[CHx])
                 {
-                    g_on_use_hi_pwm_ms[CHx] = 0u;
+                    g_on_use_hi_pwm_us[CHx] = 0u;
 
                     auto &A = ams[motion_control_ams_num];
                     if (g_on_use_jam_latch[CHx] && A.now_filament_num == (uint8_t)CHx)
@@ -1864,7 +1943,7 @@ public:
         }
         else
         {
-            g_on_use_hi_pwm_ms[CHx] = 0u;
+            g_on_use_hi_pwm_us[CHx] = 0u;
         }
 
         const int pwm_out = pwm_out0;
@@ -1911,16 +1990,25 @@ void Motion_control_set_PWM(uint8_t CHx, int PWM)
 // ===== AS5600 distance/speed =====
 int32_t as5600_distance_save[4] = {0,0,0,0};
 
-void AS5600_distance_updata()
+void AS5600_distance_updata(uint32_t now_ticks)
 {
-    static uint32_t last_ticks = 0;
-    static uint8_t  have_last_ticks = 0;
+    static uint32_t last_ticks = 0u;
+    static uint32_t last_poll_ticks = 0u;
+    static uint8_t  have_last_ticks = 0u;
     static uint8_t  was_ok[4] = {0,0,0,0};
-    static uint32_t last_stu_ticks = 0;
+    static uint32_t last_stu_ticks = 0u;
 
-    const uint32_t now_ticks = time_ticks32();
-    const uint32_t tpm  = time_hw_tpms;
-    const uint32_t tpus = time_hw_tpus;
+    uint32_t tpm = time_hw_tpms;
+    if (!tpm) tpm = 1u;
+
+    uint32_t tpus = time_hw_tpus;
+    if (!tpus) tpus = 1u;
+
+    uint32_t min_poll_ticks = tpm;
+    if ((uint32_t)(now_ticks - last_poll_ticks) < min_poll_ticks)
+        return;
+
+    last_poll_ticks = now_ticks;
 
     if ((uint32_t)(now_ticks - last_stu_ticks) >= (200u * tpm))
     {
@@ -1931,12 +2019,12 @@ void AS5600_distance_updata()
     if (!have_last_ticks)
     {
         last_ticks = now_ticks;
-        have_last_ticks = 1;
+        have_last_ticks = 1u;
         return;
     }
 
     const uint32_t dt_ticks = (uint32_t)(now_ticks - last_ticks);
-    if (dt_ticks == 0) return;
+    if (dt_ticks == 0u) return;
     last_ticks = now_ticks;
 
     const float inv_dt = (1000000.0f * (float)tpus) / (float)dt_ticks;
@@ -1951,19 +2039,19 @@ void AS5600_distance_updata()
         if (ok_now)
         {
             g_as5600_fail[i] = 0;
-            if (g_as5600_okstreak[i] < 255) g_as5600_okstreak[i]++;
-            if (g_as5600_okstreak[i] >= kAS5600_OK_RECOVER) g_as5600_good[i] = 1;
+            if (g_as5600_okstreak[i] < 255u) g_as5600_okstreak[i]++;
+            if (g_as5600_okstreak[i] >= kAS5600_OK_RECOVER) g_as5600_good[i] = 1u;
         }
         else
         {
-            g_as5600_okstreak[i] = 0;
-            if (g_as5600_fail[i] < 255) g_as5600_fail[i]++;
-            if (g_as5600_fail[i] >= kAS5600_FAIL_TRIP) g_as5600_good[i] = 0;
+            g_as5600_okstreak[i] = 0u;
+            if (g_as5600_fail[i] < 255u) g_as5600_fail[i]++;
+            if (g_as5600_fail[i] >= kAS5600_FAIL_TRIP) g_as5600_good[i] = 0u;
         }
 
         if (!AS5600_is_good(i))
         {
-            was_ok[i] = 0;
+            was_ok[i] = 0u;
             speed_as5600[i] = 0.0f;
             continue;
         }
@@ -1972,7 +2060,7 @@ void AS5600_distance_updata()
         {
             as5600_distance_save[i] = MC_AS5600.raw_angle[i];
             speed_as5600[i] = 0.0f;
-            was_ok[i] = 1;
+            was_ok[i] = 1u;
             continue;
         }
 
@@ -1980,7 +2068,7 @@ void AS5600_distance_updata()
         const int32_t now  = MC_AS5600.raw_angle[i];
 
         int32_t diff = now - last;
-        if (diff >  2048) diff -= 4096;
+        if (diff > 2048) diff -= 4096;
         if (diff < -2048) diff += 4096;
 
         as5600_distance_save[i] = now;
@@ -2313,79 +2401,92 @@ static inline void stu_apply_baseline(int error, uint64_t now_ms)
 }
 
 
-static void motor_motion_run(int error, uint64_t time_now)
+static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
 {
-
-    #if BMCU_DM_TWO_MICROSWITCH
-        for (uint8_t ch = 0; ch < kChCount; ch++)
+#if BMCU_DM_TWO_MICROSWITCH
+    for (uint8_t ch = 0; ch < kChCount; ch++)
+    {
+        if (!filament_channel_inserted[ch])
         {
-            if (!filament_channel_inserted[ch])
+            dm_loaded[ch]            = 1u;
+            dm_fail_latch[ch]        = 0u;
+            dm_auto_state[ch]        = DM_AUTO_IDLE;
+            dm_auto_try[ch]          = 0u;
+            dm_auto_t0_ms[ch]        = 0ull;
+            dm_auto_remain_m[ch]     = 0.0f;
+            dm_auto_last_m[ch]       = 0.0f;
+            dm_loaded_drop_t0_ms[ch] = 0ull;
+            dm_autoload_gate[ch]     = 0u;
+            continue;
+        }
+
+        const uint8_t ks = MC_ONLINE_key_stu[ch];
+
+        if (ks == 0u)
+        {
+            if (filament_now_position[ch] == filament_idle)
+                dm_autoload_gate[ch] = 0u;
+
+            dm_loaded[ch]            = 0u;
+            dm_fail_latch[ch]        = 0u;
+            dm_auto_state[ch]        = DM_AUTO_IDLE;
+            dm_auto_try[ch]          = 0u;
+            dm_auto_t0_ms[ch]        = 0ull;
+            dm_auto_remain_m[ch]     = 0.0f;
+            dm_auto_last_m[ch]       = 0.0f;
+            dm_loaded_drop_t0_ms[ch] = 0ull;
+            continue;
+        }
+
+        if (dm_loaded[ch] && (ks != 1u))
+        {
+            uint64_t t0 = dm_loaded_drop_t0_ms[ch];
+            if (t0 == 0ull) dm_loaded_drop_t0_ms[ch] = time_now;
+            else if ((time_now - t0) >= 100ull)
             {
-                dm_loaded[ch]            = 1u;
-                dm_fail_latch[ch]        = 0u;
-                dm_auto_state[ch]        = DM_AUTO_IDLE;
-                dm_auto_try[ch]          = 0u;
-                dm_auto_t0_ms[ch]        = 0ull;
-                dm_auto_remain_m[ch]     = 0.0f;
-                dm_auto_last_m[ch]       = 0.0f;
-                dm_loaded_drop_t0_ms[ch] = 0ull;
-                dm_autoload_gate[ch]     = 0u;
-                continue;
-            }
-
-            const uint8_t ks = MC_ONLINE_key_stu[ch];
-
-            // (<0.6V)
-            if (ks == 0u)
-            {
-                if (filament_now_position[ch] == filament_idle)
-                    dm_autoload_gate[ch] = 0u;
-
                 dm_loaded[ch]            = 0u;
-                dm_fail_latch[ch]        = 0u;
-                dm_auto_state[ch]        = DM_AUTO_IDLE;
-                dm_auto_try[ch]          = 0u;
-                dm_auto_t0_ms[ch]        = 0ull;
-                dm_auto_remain_m[ch]     = 0.0f;
-                dm_auto_last_m[ch]       = 0.0f;
                 dm_loaded_drop_t0_ms[ch] = 0ull;
-                continue;
-            }
 
-            // (>1.7V) stays stable for 100ms
-            if (dm_loaded[ch] && (ks != 1u))
-            {
-                uint64_t t0 = dm_loaded_drop_t0_ms[ch];
-                if (t0 == 0ull) dm_loaded_drop_t0_ms[ch] = time_now;
-                else if ((time_now - t0) >= 100ull)
-                {
-                    dm_loaded[ch]            = 0u;
-                    dm_loaded_drop_t0_ms[ch] = 0ull;
-
-                    dm_auto_state[ch]    = DM_AUTO_IDLE;
-                    dm_auto_try[ch]      = 0u;
-                    dm_auto_t0_ms[ch]    = 0ull;
-                    dm_auto_remain_m[ch] = 0.0f;
-                    dm_auto_last_m[ch]   = 0.0f;
-                }
-            }
-            else
-            {
-                dm_loaded_drop_t0_ms[ch] = 0ull;
+                dm_auto_state[ch]    = DM_AUTO_IDLE;
+                dm_auto_try[ch]      = 0u;
+                dm_auto_t0_ms[ch]    = 0ull;
+                dm_auto_remain_m[ch] = 0.0f;
+                dm_auto_last_m[ch]   = 0.0f;
             }
         }
-    #endif
+        else
+        {
+            dm_loaded_drop_t0_ms[ch] = 0ull;
+        }
+    }
+#endif
 
-    static uint64_t time_last = 0;
+    static uint32_t last_ticks = 0u;
+    static uint8_t  have_last_ticks = 0u;
 
-    if (time_last == 0) { time_last = time_now; return; }
+    uint32_t dt_ticks = 0u;
+    if (!have_last_ticks)
+    {
+        have_last_ticks = 1u;
+    }
+    else
+    {
+        dt_ticks = (uint32_t)(now_ticks - last_ticks);
+    }
+    last_ticks = now_ticks;
 
-    uint64_t dt_ms = time_now - time_last;
-    if (dt_ms == 0) return;
-    if (dt_ms > 200) dt_ms = 200;
+    uint32_t tpm = time_hw_tpms;
+    if (!tpm) tpm = 1u;
 
-    const float time_E = (float)dt_ms * 0.001f;
-    time_last = time_now;
+    const uint32_t max_dt_ticks = 200u * tpm;
+    if (dt_ticks > max_dt_ticks) dt_ticks = max_dt_ticks;
+
+    uint32_t tpus = time_hw_tpus;
+    if (!tpus) tpus = 1u;
+
+    const bool have_time_step = (dt_ticks != 0u);
+    const float time_E = have_time_step ? ((float)dt_ticks / ((float)tpus * 1000000.0f)) : 0.0f;
+
     stu_apply_baseline(error, time_now);
 
 #if BMCU_ONLINE_LED_FILAMENT_RGB
@@ -2411,9 +2512,10 @@ static void motor_motion_run(int error, uint64_t time_now)
             Motion_control_set_PWM(i, 0);
             continue;
         }
-        MOTOR_CONTROL[i].run(time_E, time_now);
 
-        // ONLINE LED
+        if (have_time_step)
+            MOTOR_CONTROL[i].run(time_E, time_now);
+
         uint8_t r = 0u, g = 0u, b = 0u;
         bool is_filament_rgb = false;
 
@@ -2482,10 +2584,13 @@ static void motor_motion_run(int error, uint64_t time_now)
 
 void Motion_control_run(int error)
 {
-    MC_PULL_ONLINE_read();
+    const uint64_t now_ticks64 = time_ticks64();
+    const uint32_t now_ticks   = (uint32_t)now_ticks64;
+    const uint64_t now_ms      = time_ms_fast_from_ticks64(now_ticks64);
+
+    MC_PULL_ONLINE_read(now_ticks);
 
     auto &A = ams[motion_control_ams_num];
-    const uint64_t now_ms = time_ms_fast();
 
     for (uint8_t ch = 0; ch < kChCount; ch++)
     {
@@ -2494,19 +2599,10 @@ void Motion_control_run(int error)
         {
             if (!error)
             {
-                auto &A = ams[motion_control_ams_num];
-
                 if (A.now_filament_num == ch)
                 {
                     if (A.filament[ch].motion == _filament_motion::send_out)
-                    {
-                        A.filament[ch].motion = _filament_motion::idle;
-                        A.filament_use_flag   = 0x00;
-                        A.pressure            = 0xFFFF;
-
-                        filament_now_position[ch] = filament_idle;
                         MOTOR_CONTROL[ch].set_motion(filament_motion_enum::filament_motion_stop, 100, now_ms);
-                    }
                 }
             }
 
@@ -2516,7 +2612,7 @@ void Motion_control_run(int error)
                 g_on_use_jam_latch[ch] = 0u;
             }
 
-            g_on_use_hi_pwm_ms[ch] = 0u;
+            g_on_use_hi_pwm_us[ch] = 0u;
         }
     }
 
@@ -2529,9 +2625,7 @@ void Motion_control_run(int error)
             const _filament_motion m = A.filament[n].motion;
 
             if (m == _filament_motion::on_use || m == _filament_motion::send_out)
-            {
                 A.pressure = 0xF06Fu;
-            }
         }
     }
 
@@ -2554,47 +2648,49 @@ void Motion_control_run(int error)
             if (hard_blue) { pressed = (int)ch; break; }
         }
 
-        const uint32_t tpm   = time_hw_tpms;
-        const uint32_t now_t = time_ticks32();
+        uint32_t tpm = time_hw_tpms;
+        if (!tpm) tpm = 1u;
 
         if (pressed >= 0)
         {
-            if (g_hold_ch != pressed) {
+            if (g_hold_ch != pressed)
+            {
                 g_hold_ch = pressed;
-                g_hold_t0_ticks = now_t;
-            } else {
-                if ((uint32_t)(now_t - g_hold_t0_ticks) >= (uint32_t)CAL_RESET_HOLD_MS * tpm)
+                g_hold_t0_ticks = now_ticks;
+            }
+            else
+            {
+                if ((uint32_t)(now_ticks - g_hold_t0_ticks) >= (uint32_t)CAL_RESET_HOLD_MS * tpm)
                     calibration_reset_and_reboot();
             }
         }
         else
         {
             g_hold_ch = -1;
-            g_hold_t0_ticks = 0;
+            g_hold_t0_ticks = 0u;
         }
     }
     else
     {
         g_hold_ch = -1;
-        g_hold_t0_ticks = 0;
+        g_hold_t0_ticks = 0u;
     }
 
-    AS5600_distance_updata();
+    AS5600_distance_updata(now_ticks);
 
     for (uint8_t i = 0; i < kChCount; i++)
     {
-        if (MC_ONLINE_key_stu[i] != 0) A.filament[i].online = true;
+        if (MC_ONLINE_key_stu[i] != 0u) A.filament[i].online = true;
         else if ((filament_now_position[i] == filament_redetect) || (filament_now_position[i] == filament_pulling_back))
             A.filament[i].online = true;
         else
             A.filament[i].online = false;
     }
 
-    motor_motion_run(error, now_ms);
+    motor_motion_run(error, now_ms, now_ticks);
 
     for (uint8_t i = 0; i < kChCount; i++)
     {
-        // AS5600 error
         if ((MC_AS5600.online[i] == false) || (MC_AS5600.magnet_stu[i] == -1))
             MC_STU_RGB_set(i, 0xFF, 0x00, 0x00);
     }
@@ -2616,7 +2712,7 @@ void MC_PWM_init()
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_15;
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE); // zegar AFIO
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
@@ -2624,7 +2720,6 @@ void MC_PWM_init()
     TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
     TIM_OCInitTypeDef TIM_OCInitStructure;
 
-    // baza timera
     TIM_TimeBaseStructure.TIM_Period        = 999;
     TIM_TimeBaseStructure.TIM_Prescaler     = 1;
     TIM_TimeBaseStructure.TIM_ClockDivision = 0;
@@ -2634,26 +2729,36 @@ void MC_PWM_init()
     TIM_TimeBaseInit(TIM3, &TIM_TimeBaseStructure);
     TIM_TimeBaseInit(TIM4, &TIM_TimeBaseStructure);
 
-    // PWM1
     TIM_OCInitStructure.TIM_OCMode      = TIM_OCMode_PWM1;
     TIM_OCInitStructure.TIM_OutputState = TIM_OutputState_Enable;
     TIM_OCInitStructure.TIM_Pulse       = 0;
     TIM_OCInitStructure.TIM_OCPolarity  = TIM_OCPolarity_High;
 
-    TIM_OC1Init(TIM2, &TIM_OCInitStructure); // PA15
-    TIM_OC2Init(TIM2, &TIM_OCInitStructure); // PB3
+    TIM_OC1Init(TIM2, &TIM_OCInitStructure);
+    TIM_OC2Init(TIM2, &TIM_OCInitStructure);
 
-    TIM_OC1Init(TIM3, &TIM_OCInitStructure); // PB4
-    TIM_OC2Init(TIM3, &TIM_OCInitStructure); // PB5
+    TIM_OC1Init(TIM3, &TIM_OCInitStructure);
+    TIM_OC2Init(TIM3, &TIM_OCInitStructure);
 
-    TIM_OC1Init(TIM4, &TIM_OCInitStructure); // PB6
-    TIM_OC2Init(TIM4, &TIM_OCInitStructure); // PB7
-    TIM_OC3Init(TIM4, &TIM_OCInitStructure); // PB8
-    TIM_OC4Init(TIM4, &TIM_OCInitStructure); // PB9
+    TIM_OC1Init(TIM4, &TIM_OCInitStructure);
+    TIM_OC2Init(TIM4, &TIM_OCInitStructure);
+    TIM_OC3Init(TIM4, &TIM_OCInitStructure);
+    TIM_OC4Init(TIM4, &TIM_OCInitStructure);
 
-    GPIO_PinRemapConfig(GPIO_FullRemap_TIM2, ENABLE);    // TIM2 full remap: CH1-PA15 / CH2-PB3
-    GPIO_PinRemapConfig(GPIO_PartialRemap_TIM3, ENABLE); // TIM3 partial: CH1-PB4 / CH2-PB5
-    GPIO_PinRemapConfig(GPIO_Remap_TIM4, DISABLE);       // TIM4 no remap
+    TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Enable);
+    TIM_OC2PreloadConfig(TIM2, TIM_OCPreload_Enable);
+
+    TIM_OC1PreloadConfig(TIM3, TIM_OCPreload_Enable);
+    TIM_OC2PreloadConfig(TIM3, TIM_OCPreload_Enable);
+
+    TIM_OC1PreloadConfig(TIM4, TIM_OCPreload_Enable);
+    TIM_OC2PreloadConfig(TIM4, TIM_OCPreload_Enable);
+    TIM_OC3PreloadConfig(TIM4, TIM_OCPreload_Enable);
+    TIM_OC4PreloadConfig(TIM4, TIM_OCPreload_Enable);
+
+    GPIO_PinRemapConfig(GPIO_FullRemap_TIM2, ENABLE);
+    GPIO_PinRemapConfig(GPIO_PartialRemap_TIM3, ENABLE);
+    GPIO_PinRemapConfig(GPIO_Remap_TIM4, DISABLE);
 
     TIM_CtrlPWMOutputs(TIM2, ENABLE);
     TIM_ARRPreloadConfig(TIM2, ENABLE);
@@ -2810,8 +2915,10 @@ void Motion_control_init()
     A.online   = true;
     A.ams_type = 0x03;
 
+    (void)Motion_control_read();
+
     MC_PULL_ONLINE_init();
-    MC_PULL_ONLINE_read();
+    MC_PULL_ONLINE_read(time_ticks32());
 
     #if BMCU_DM_TWO_MICROSWITCH
         for (uint8_t ch = 0; ch < kChCount; ch++)

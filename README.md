@@ -6,7 +6,18 @@ IMPORTANT:
 The printer must be configured as AMS, not AMS Lite.
 Using AMS Lite will cause incompatibility issues.
 
-# IMPORTANT – HMS WARNING STATUS
+
+# ❗ IMPORTANT - FIRST START (V10.3+) ❗
+
+At the first startup after flashing, **all channels must be empty**.
+
+From **V10.3**, the firmware calibrates empty-channel detection during first boot.
+
+If you flashed it with filament inserted:
+- remove all filament
+- hold any one buffer for about **5 seconds** to re-calibrate
+
+# HMS WARNING STATUS
 
 This firmware version **triggers an HMS warning immediately after printer startup**.
 
@@ -74,67 +85,6 @@ The flasher also supports **Android**, so you can even flash the BMCU directly f
 IMPORTANT:
 - Do **NOT** flash the BMCU while it is connected to the printer.
 - Do **NOT** connect or disconnect the BMCU while the printer is powered on (risk of damaging the BMCU and/or the printer mainboard).
-
-## Folder structure (generated firmware)
-
-Firmware is generated into this tree (choose printer mode folder first):
-
-firmwares/
-- standard(A1)/
-    - AUTOLOAD/
-        - FILAMENT_RGB_ON/
-            - SOLO/
-            - AMS_A/
-            - AMS_B/
-            - AMS_C/
-            - AMS_D/
-        - FILAMENT_RGB_OFF/
-            - SOLO/
-            - AMS_A/
-            - AMS_B/
-            - AMS_C/
-            - AMS_D/
-    - NO_AUTOLOAD/
-        - FILAMENT_RGB_ON/
-            - SOLO/
-            - AMS_A/
-            - AMS_B/
-            - AMS_C/
-            - AMS_D/
-        - FILAMENT_RGB_OFF/
-            - SOLO/
-            - AMS_A/
-            - AMS_B/
-            - AMS_C/
-            - AMS_D/
-
-- high_force_load(P1S)/
-    - AUTOLOAD/
-        - FILAMENT_RGB_ON/
-            - SOLO/
-            - AMS_A/
-            - AMS_B/
-            - AMS_C/
-            - AMS_D/
-        - FILAMENT_RGB_OFF/
-            - SOLO/
-            - AMS_A/
-            - AMS_B/
-            - AMS_C/
-            - AMS_D/
-    - NO_AUTOLOAD/
-        - FILAMENT_RGB_ON/
-            - SOLO/
-            - AMS_A/
-            - AMS_B/
-            - AMS_C/
-            - AMS_D/
-        - FILAMENT_RGB_OFF/
-            - SOLO/
-            - AMS_A/
-            - AMS_B/
-            - AMS_C/
-            - AMS_D/
 
 ---
 
@@ -251,6 +201,42 @@ This firmware has undergone solid testing, and no issues are expected.
 ---
 
 # Changelog
+
+## V10.3
+
+### User-visible changes
+- Added new firmware mode: **soft_load(A1)**.
+    - Intended mainly for **A1 / A1 Mini** users.
+    - Uses lower filament loading force than **standard(A1)**.
+    - Useful for some BMCU units with weaker lever springs, where stronger loading can cause clicking / grinding during filament load.
+- Improved empty-channel detection calibration.
+    - The firmware now calibrates and stores the "no filament" detection point separately for each channel.
+    - This improves reliability on hardware variants where idle detection voltage differs between channels/modules.
+- Improved calibration behavior:
+    - calibration now also detects and saves **Hall polarity per channel**
+    - magnet polarity is automatically detected during calibration and stored, so it no longer matters which way the magnet is inserted in the buffer
+
+### Stability and behavior improvements
+- Fixed PWM timer preload configuration on all motor channels.
+    - PWM updates are now buffered correctly before timer update events.
+- Improved AS5600 update timing.
+    - Sensor polling is now rate-limited to about **1 ms**
+    - more stable speed calculation
+    - lower unnecessary CPU load
+- Improved internal timing paths by reusing shared tick snapshots in the main motion loop.
+    - less timing jitter
+    - more consistent runtime behavior
+- Improved high-load / jam timing logic during on_use.
+    - high PWM accumulation now uses **microsecond precision** instead of millisecond buckets
+- Improved motion loop time-step handling.
+    - uses wrap-safe tick delta
+    - clamps oversized time steps
+    - avoids running motor control with invalid zero-step timing
+
+### Notes
+- `soft_load(A1)` is not meant as the default for everyone.
+- If filament gets rejected because push force is too weak, switch back to `standard(A1)` and use a stronger lever spring.
+- On some A1 / A1 Mini units, `soft_load(A1)` works very well and can be used permanently.
 
 ## V10.2
 

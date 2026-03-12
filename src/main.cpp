@@ -30,20 +30,16 @@ void RGB_update()
           RGBOUT[2].is_dirty() || RGBOUT[3].is_dirty()))
         return;
 
-    static uint32_t next   = 0u;
-    static uint32_t period = 0u;
+    static uint32_t last = 0u;
 
-    if (!period)
-    {
-        uint32_t p = time_hw_tpms * 10u;
-        period = p ? p : 1u;
-    }
+    uint32_t min_gap = time_hw_tpms;
+    if (!min_gap) min_gap = 1u;
 
     const uint32_t now = time_ticks32();
-    if ((int32_t)(now - next) < 0)
+    if (last != 0u && (uint32_t)(now - last) < min_gap)
         return;
 
-    next = now + period;
+    last = now;
 
     SYS_RGB.updata();
     RGBOUT[0].updata();
