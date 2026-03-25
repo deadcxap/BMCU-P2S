@@ -2513,8 +2513,27 @@ static void motor_motion_run(int error, uint64_t time_now, uint32_t now_ticks)
             continue;
         }
 
-        if (have_time_step)
+        const bool manual_empty_pull =
+            filament_channel_inserted[i] &&
+            (MC_ONLINE_key_stu[i] == 0u) &&
+            (MC_PULL_pct_f[i] > 80.0f);
+
+        if (manual_empty_pull)
+        {
+            float x = MOTOR_CONTROL[i].dir * 700.0f;
+            if (x * MOTOR_CONTROL[i].dir < 0.0f) x = 0.0f;
+
+            MOTOR_CONTROL[i].PID_speed.clear();
+            MOTOR_CONTROL[i].PID_pressure.clear();
+            MOTOR_CONTROL[i].pwm_zeroed = (x == 0.0f) ? 1u : 0u;
+            _MOTOR_CONTROL::x_prev[i] = x;
+
+            Motion_control_set_PWM(i, (int)x);
+        }
+        else if (have_time_step)
+        {
             MOTOR_CONTROL[i].run(time_E, time_now);
+        }
 
         uint8_t r = 0u, g = 0u, b = 0u;
         bool is_filament_rgb = false;
