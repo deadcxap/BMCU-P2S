@@ -44,6 +44,8 @@ https://github.com/jarczakpawel/BambuStudio-BMCU
 - Bambu Lab A1 mini
 - Bambu Lab P1S
 - Bambu Lab X1C
+- Bambu Lab P2S
+- The **H2 series** will most likely also work as well, because **1st generation AMS support** is confirmed there.
 
 Other printers may also work, but they have not been tested.
 
@@ -201,6 +203,17 @@ This firmware has undergone solid testing, and no issues are expected.
 ---
 
 # Changelog
+
+## V10.4
+
+### User-visible changes
+- Added support for **Bambu Lab P2S**.
+  - Verified to work correctly in real tests.
+  - The **H2 series** will most likely also work as well, because **1st generation AMS support** is confirmed there.
+
+### Fixes
+- **"filament in use"** flag is now cleared correctly when filament runs out during printing.
+- Added support for **retraction when the buffer is pulled up manually**, even when there is **no filament inside**.
 
 ## V10.3
 
