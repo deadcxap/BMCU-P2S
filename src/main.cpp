@@ -14,6 +14,7 @@
 WS2812_class SYS_RGB;
 WS2812_class RGBOUT[4];
 
+// Инициализация системного светодиода и 4 каналов подсветки буферов.
 void RGB_init()
 {
     SYS_RGB.init(1, GPIOD, GPIO_Pin_1);
@@ -23,6 +24,8 @@ void RGB_init()
     RGBOUT[3].init(2, GPIOB, GPIO_Pin_0);
 }
 
+// Периодическое обновление светодиодов только при изменении состояния.
+// Ограничение по времени нужно, чтобы не перегружать шину/тайминги.
 void RGB_update()
 {
     if (!(SYS_RGB.is_dirty() ||
@@ -52,6 +55,7 @@ static uint8_t g_fil_dirty = 0;
 static uint8_t g_loaded_ch = 0xFF;
 static uint8_t g_state_dirty = 0;
 
+// Копирование параметров катушки из RAM-структуры AMS в формат записи во Flash.
 static inline void ram_to_flashinfo(uint8_t fil, Flash_FilamentInfo* o)
 {
     const _filament* f = &ams[BAMBU_BUS_AMS_NUM].filament[fil];
@@ -66,6 +70,7 @@ static inline void ram_to_flashinfo(uint8_t fil, Flash_FilamentInfo* o)
     memcpy(o->name, f->name, sizeof(o->name));
 }
 
+// Восстановление параметров катушки из Flash в рабочие структуры RAM.
 static inline void flashinfo_to_ram(uint8_t fil, const Flash_FilamentInfo* i)
 {
     _filament* f = &ams[BAMBU_BUS_AMS_NUM].filament[fil];
@@ -165,6 +170,7 @@ void ams_datas_save_run()
 
 int main(void)
 {
+    // Базовая инициализация MCU и тайм-базы.
     SystemInit();
     SystemCoreClockUpdate();
     time_hw_init();
@@ -178,6 +184,7 @@ int main(void)
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_1);
     GPIO_PinRemapConfig(GPIO_Remap_PD01, ENABLE);
 
+    // Настройка приоритетов, remap пинов, индикация старта.
     RGB_init();
     delay(10);
 
@@ -186,6 +193,7 @@ int main(void)
     RGB_update();
     delay(50);
 
+    // Инициализация логики AMS, Flash-хранилища и АЦП.
     DEBUG_init();
     ams_init();
     Flash_saves_init();
@@ -193,9 +201,11 @@ int main(void)
     ADC_DMA_init();
     ADC_DMA_wait_full();
 
+    // Загрузка калибровок и пользовательских данных из Flash.
     MC_PULL_calibration_boot();
     ams_datas_read();
 
+    // Восстановление состояния "какой канал был загружен" до перезапуска.
     {
         uint8_t ch = 0xFFu;
         if (Flash_AMS_state_read(&ch))
@@ -221,10 +231,11 @@ int main(void)
     Motion_control_init();
     bus_init();
 
-    DEBUG("START\n");
+    DEBUG("СТАРТ\n");
 
     while (1)
     {
+        // Обрабатываем оба протокола: внутреннюю шину и шину принтера.
         const ahubus_package_type   ahub_stu     = ahubus_run();
         const bambubus_package_type bambubus_stu = bambubus_run();
         bus_port_to_host.send_package();
@@ -239,6 +250,7 @@ int main(void)
 
                 if (bambubus_stu == bambubus_package_type::heartbeat)
                 {
+                    // Если есть heartbeat от принтера — подсветка "онлайн".
                     SYS_RGB.set_RGB(0x38, 0x35, 0x32, 0);
                     bus_host_device_type = host_device_type_ams;
                 }
