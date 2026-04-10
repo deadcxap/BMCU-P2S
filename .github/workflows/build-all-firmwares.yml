@@ -1,0 +1,45 @@
+name: Build all firmwares
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - 'scripts/ci/build_all_firmwares.py'
+      - '.github/workflows/build-all-firmwares.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build all variants
+        run: python3 scripts/ci/build_all_firmwares.py
+
+      - name: Archive build directory
+        run: |
+          tar -czf build-artifacts.tar.gz build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmcu-firmwares
+          path: |
+            build/
+            build-artifacts.tar.gz
