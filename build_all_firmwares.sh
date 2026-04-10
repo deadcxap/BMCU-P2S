@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 command -v pio >/dev/null 2>&1 || { echo "ERROR: nie ma 'pio' w PATH"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "ERROR: nie ma 'python3' w PATH"; exit 1; }
 
-OUT_DIR="firmwares"
+OUT_DIR="build"
 PIO_ENV="fw"
 
 TXT_MODE="which_to_choose_mode.txt"
